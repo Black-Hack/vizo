@@ -17,5 +17,15 @@
 	},
 	"dependencies": {
 		"hono": "^4.8.4"
+	},
+	"prettier": {
+		"printWidth": 100,
+		"tabWidth": 4,
+		"useTabs": true,
+		"semi": false,
+		"singleQuote": true,
+		"trailingComma": "all",
+		"bracketSameLine": true,
+		"arrowParens": "avoid"
 	}
 }
