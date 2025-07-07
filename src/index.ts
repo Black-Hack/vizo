@@ -12,6 +12,8 @@
  */
 
 import { env } from 'cloudflare:workers';
+import { Hono } from 'hono/quick';
+import { HTTPException } from 'hono/http-exception';
 
 const encoder = new TextEncoder();
 const privateKey = await crypto.subtle.importKey(
@@ -38,34 +40,25 @@ const publicKey = await crypto.subtle.importKey(
 	['verify']
 );
 
-export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		const url = new URL(request.url);
-		try {
-			if (url.pathname === '/view') {
-				if (request.method === 'GET') {
-					const tenant = url.searchParams.get('tenant');
-					const sub = url.searchParams.get('sub');
-					const sig = url.searchParams.get('sig');
-					if (!tenant || !sub || !sig) {
-						return new Response(null, { status: 400 });
-					}
-					const isValid = await crypto.subtle.verify(
-						'Ed25519',
-						publicKey,
-						Uint8Array.from(atob(sig), (c) => c.charCodeAt(0)),
-						encoder.encode(`${tenant}:${sub}`)
-					);
-					if (!isValid) {
-						return new Response(null, { status: 403 });
-					}
-					return new Response(`<html><body><h1>Tenant: ${tenant}</h1><h2>Subject: ${sub}</h2></body></html>`, {
-						headers: { 'Content-Type': 'text/html' },
-					});
-				} else return new Response(null, { status: 405, headers: { Allow: 'GET' } });
-			} else return new Response(null, { status: 404 });
-		} catch {
-			return new Response(null, { status: 500 });
-		}
-	},
-} satisfies ExportedHandler<Env>;
+const app = new Hono();
+
+app.get('/view', async (c) => {
+	const tenant = c.req.query('tenant');
+	const sub = c.req.query('sub');
+	const sig = c.req.query('sig');
+	if (!tenant || !sub || !sig) {
+		throw new HTTPException(400);
+	}
+	const isValid = await crypto.subtle.verify(
+		'Ed25519',
+		publicKey,
+		Uint8Array.from(atob(sig), (c) => c.charCodeAt(0)),
+		encoder.encode(`${tenant}:${sub}`)
+	);
+	if (!isValid) {
+		throw new HTTPException(403);
+	}
+	return c.html(`<html><body><h1>Tenant: ${tenant}</h1><h2>Subject: ${sub}</h2></body></html>`);
+});
+
+export default app satisfies ExportedHandler<Env>;
