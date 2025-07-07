@@ -11,54 +11,100 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import { env } from 'cloudflare:workers';
-import { Hono } from 'hono/quick';
-import { HTTPException } from 'hono/http-exception';
+import { env } from 'cloudflare:workers'
+import { Hono } from 'hono/quick'
+import { jwt, sign, type JwtVariables } from 'hono/jwt'
+import { jwk } from 'hono/jwk'
+import { setCookie } from 'hono/cookie'
+import { HTTPException } from 'hono/http-exception'
 
-const encoder = new TextEncoder();
+const encoder = new TextEncoder()
 const privateKey = await crypto.subtle.importKey(
 	'jwk',
-	{
-		kty: 'OKP',
-		crv: 'Ed25519',
-		x: env.PUBLIC_KEY,
-		d: env.PRIVATE_KEY,
-	},
+	{ kty: 'OKP', crv: 'Ed25519', x: env.PUBLIC_KEY, d: env.PRIVATE_KEY },
 	'Ed25519',
 	false,
-	['sign']
-);
+	['sign'],
+)
 const publicKey = await crypto.subtle.importKey(
 	'jwk',
-	{
-		kty: 'OKP',
-		crv: 'Ed25519',
-		x: env.PUBLIC_KEY,
-	},
+	{ kty: 'OKP', crv: 'Ed25519', x: env.PUBLIC_KEY },
 	'Ed25519',
 	false,
-	['verify']
-);
+	['verify'],
+)
 
-const app = new Hono();
+const app = new Hono<{
+	Variables: JwtVariables<{ sub: string; aud: string; iss: string }>
+}>()
 
-app.get('/view', async (c) => {
-	const tenant = c.req.query('tenant');
-	const sub = c.req.query('sub');
-	const sig = c.req.query('sig');
+app.use(
+	'/api/*',
+	jwt({
+		secret: publicKey,
+		alg: 'EdDSA',
+		cookie: { key: 'jwt', prefixOptions: 'host' },
+	}),
+)
+
+app.post(
+	'/api-auth/login',
+	jwk({ jwks_uri: 'https://www.googleapis.com/oauth2/v3/certs' }),
+	async c => {
+		const googleToken = c.get('jwtPayload')
+		if (
+			googleToken.aud !== env.GOOGLE_CLIENT_ID ||
+			(googleToken.iss !== 'accounts.google.com' &&
+				googleToken.iss !== 'https://accounts.google.com')
+		) {
+			throw new HTTPException(401)
+		}
+
+		const now = Date.now()
+		const ttl = 1000 * 60 * 60 * 24 * 7
+		const exp = now + ttl
+
+		setCookie(
+			c,
+			'jwt',
+			await sign(
+				{
+					sub: googleToken.sub,
+					iat: Math.floor(now / 1000),
+					exp: Math.floor(exp / 1000),
+				},
+				privateKey,
+				'EdDSA',
+			),
+			{
+				expires: new Date(exp),
+				httpOnly: true,
+				path: '/',
+				secure: true,
+				sameSite: 'lax',
+				prefix: 'host',
+			},
+		)
+	},
+)
+
+app.get('/view', async c => {
+	const tenant = c.req.query('tenant')
+	const sub = c.req.query('sub')
+	const sig = c.req.query('sig')
 	if (!tenant || !sub || !sig) {
-		throw new HTTPException(400);
+		throw new HTTPException(400)
 	}
 	const isValid = await crypto.subtle.verify(
 		'Ed25519',
 		publicKey,
-		Uint8Array.from(atob(sig), (c) => c.charCodeAt(0)),
-		encoder.encode(`${tenant}:${sub}`)
-	);
+		Uint8Array.from(atob(sig), c => c.charCodeAt(0)),
+		encoder.encode(`${tenant}:${sub}`),
+	)
 	if (!isValid) {
-		throw new HTTPException(403);
+		throw new HTTPException(403)
 	}
-	return c.html(`<html><body><h1>Tenant: ${tenant}</h1><h2>Subject: ${sub}</h2></body></html>`);
-});
+	return c.html(`<html><body><h1>Tenant: ${tenant}</h1><h2>Subject: ${sub}</h2></body></html>`)
+})
 
-export default app satisfies ExportedHandler<Env>;
+export default app satisfies ExportedHandler<Env>
