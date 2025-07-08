@@ -170,3 +170,18 @@ dist
 
 .dev.vars
 .wrangler/
+
+# Output
+
+/.svelte-kit
+/build
+
+# OS
+
+.DS_Store
+Thumbs.db
+
+# Vite
+
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
