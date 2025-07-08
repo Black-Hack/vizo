@@ -11,7 +11,6 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import { env } from 'cloudflare:workers'
 import { Hono } from 'hono/quick'
 import { jwt, sign, type JwtVariables } from 'hono/jwt'
 import { jwk } from 'hono/jwk'
@@ -19,33 +18,25 @@ import { setCookie } from 'hono/cookie'
 import { HTTPException } from 'hono/http-exception'
 
 const encoder = new TextEncoder()
-const privateKey = await crypto.subtle.importKey(
-	'jwk',
-	{ kty: 'OKP', crv: 'Ed25519', x: env.PUBLIC_KEY, d: env.PRIVATE_KEY },
-	'Ed25519',
-	false,
-	['sign'],
-)
-const publicKey = await crypto.subtle.importKey(
-	'jwk',
-	{ kty: 'OKP', crv: 'Ed25519', x: env.PUBLIC_KEY },
-	'Ed25519',
-	false,
-	['verify'],
-)
 
 const app = new Hono<{
+	Bindings: Env
 	Variables: JwtVariables<{ sub: string; aud: string; iss: string }>
 }>()
 
-app.use(
-	'/api/*',
-	jwt({
+app.use('/api/*', async (c, next) => {
+	const publicKey = {
+		kty: 'OKP',
+		crv: 'Ed25519',
+		x: c.env.PUBLIC_KEY,
+	} satisfies JsonWebKey
+
+	return await jwt({
 		secret: publicKey,
 		alg: 'EdDSA',
 		cookie: { key: 'jwt', prefixOptions: 'host' },
-	}),
-)
+	})(c, next)
+})
 
 app.post(
 	'/api-auth/login',
@@ -53,38 +44,38 @@ app.post(
 	async c => {
 		const googleToken = c.get('jwtPayload')
 		if (
-			googleToken.aud !== env.GOOGLE_CLIENT_ID ||
+			googleToken.aud !== c.env.GOOGLE_CLIENT_ID ||
 			(googleToken.iss !== 'accounts.google.com' &&
 				googleToken.iss !== 'https://accounts.google.com')
 		) {
 			throw new HTTPException(401)
 		}
 
+		const privateKey = {
+			kty: 'OKP',
+			crv: 'Ed25519',
+			x: c.env.PUBLIC_KEY,
+			d: c.env.PRIVATE_KEY,
+		} satisfies JsonWebKey
+
 		const now = Date.now()
 		const ttl = 1000 * 60 * 60 * 24 * 7
 		const exp = now + ttl
 
-		setCookie(
-			c,
-			'jwt',
-			await sign(
-				{
-					sub: googleToken.sub,
-					iat: Math.floor(now / 1000),
-					exp: Math.floor(exp / 1000),
-				},
-				privateKey,
-				'EdDSA',
-			),
-			{
-				expires: new Date(exp),
-				httpOnly: true,
-				path: '/',
-				secure: true,
-				sameSite: 'lax',
-				prefix: 'host',
-			},
+		const jwt = await sign(
+			{ sub: googleToken.sub, iat: Math.floor(now / 1000), exp: Math.floor(exp / 1000) },
+			privateKey,
+			'EdDSA',
 		)
+
+		setCookie(c, 'jwt', jwt, {
+			expires: new Date(exp),
+			httpOnly: true,
+			path: '/',
+			secure: true,
+			sameSite: 'lax',
+			prefix: 'host',
+		})
 	},
 )
 
@@ -96,7 +87,7 @@ app.get('/login', async c => {
     <script src="https://accounts.google.com/gsi/client"></script>
 	<script>
 	google.accounts.id.initialize({
-		client_id: '${env.GOOGLE_CLIENT_ID}',
+		client_id: '${c.env.GOOGLE_CLIENT_ID}',
 		callback: handleCredentialResponse
 	});
 	google.accounts.id.renderButton(
@@ -125,6 +116,15 @@ app.get('/view', async c => {
 	if (!tenant || !sub || !sig) {
 		throw new HTTPException(400)
 	}
+
+	const publicKey = await crypto.subtle.importKey(
+		'jwk',
+		{ kty: 'OKP', crv: 'Ed25519', x: c.env.PUBLIC_KEY },
+		'Ed25519',
+		false,
+		['verify'],
+	)
+
 	const isValid = await crypto.subtle.verify(
 		'Ed25519',
 		publicKey,
