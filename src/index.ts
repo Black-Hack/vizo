@@ -134,7 +134,7 @@ app.get('/view', async c => {
 	if (!isValid) {
 		throw new HTTPException(403)
 	}
-	return c.html(`<html><body><h1>Tenant: ${tenant}</h1><h2>Subject: ${sub}</h2></body></html>`)
+	return c.html(`<html><body>User ${sub} has 0 vizo.</body></html>`)
 })
 
 export default app satisfies ExportedHandler<Env>
