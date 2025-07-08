@@ -88,6 +88,36 @@ app.post(
 	},
 )
 
+app.get('/login', async c => {
+	return c.html(`
+<html>
+  <body>
+    <div id="buttonDiv"></div>
+    <script src="https://accounts.google.com/gsi/client"></script>
+	<script>
+	google.accounts.id.initialize({
+		client_id: '${env.GOOGLE_CLIENT_ID}',
+		callback: handleCredentialResponse
+	});
+	google.accounts.id.renderButton(
+		document.getElementById("buttonDiv"),
+		{ theme: "outline", size: "large" }
+	);
+
+	async function handleCredentialResponse(response) {
+		console.log("Encoded JWT ID token: " + response.credential);
+		const resp = await fetch('/api-auth/login', {
+			method: 'POST',
+			headers: {
+				'Authorization': 'Bearer ' + response.credential,
+			},
+		});
+	}
+	</script>
+  </body>
+</html>`)
+})
+
 app.get('/view', async c => {
 	const tenant = c.req.query('tenant')
 	const sub = c.req.query('sub')
