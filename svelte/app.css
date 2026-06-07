@@ -1,0 +1,16 @@
+@font-face {
+	font-family: 'Boogaloo';
+	src: url('/Boogaloo-Regular.ttf') format('truetype');
+}
+
+body {
+	font-family: 'Boogaloo';
+}
+
+input,
+select,
+textarea,
+button {
+	font-family: inherit;
+	appearance: none;
+}
